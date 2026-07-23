@@ -17,3 +17,6 @@ __pycache__/
 
 # Logs
 *.log
+
+# Local user store (created at runtime)
+users.json
