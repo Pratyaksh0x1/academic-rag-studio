@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 430" role="img" aria-label="Academic RAG system architecture">
+  <rect width="1400" height="430" fill="#09111f"/>
+  <text x="70" y="66" fill="#f8fafc" font-family="Verdana" font-size="28" font-weight="bold">Academic RAG Studio</text>
+  <text x="70" y="98" fill="#9fb0c7" font-family="Verdana" font-size="15">From paper upload to cited, measured answers</text>
+  <g font-family="Verdana" font-size="16" text-anchor="middle">
+    <g fill="#102b3d" stroke="#5eead4" stroke-width="2"><rect x="65" y="165" width="205" height="105" rx="8"/><rect x="330" y="165" width="205" height="105" rx="8"/></g>
+    <g fill="#172a49" stroke="#60a5fa" stroke-width="2"><rect x="595" y="165" width="205" height="105" rx="8"/><rect x="860" y="165" width="205" height="105" rx="8"/></g>
+    <g fill="#3b2e18" stroke="#fbbf24" stroke-width="2"><rect x="1125" y="165" width="205" height="105" rx="8"/></g>
+    <g fill="#f8fafc"><text x="167" y="210">PDF ingestion</text><text x="167" y="236" fill="#9fb0c7" font-size="13">LlamaParse</text><text x="432" y="210">Indexing</text><text x="432" y="236" fill="#9fb0c7" font-size="13">ChromaDB + chunks</text><text x="697" y="210">Retrieval</text><text x="697" y="236" fill="#9fb0c7" font-size="13">BGE + reranker</text><text x="962" y="210">Generation</text><text x="962" y="236" fill="#9fb0c7" font-size="13">Ollama / OpenAI</text><text x="1227" y="210">Evidence</text><text x="1227" y="236" fill="#9fb0c7" font-size="13">Citations + analytics</text></g>
+  </g>
+  <g stroke="#9fb0c7" stroke-width="2" fill="none"><path d="M270 218h60"/><path d="M535 218h60"/><path d="M800 218h60"/><path d="M1065 218h60"/></g>
+</svg>

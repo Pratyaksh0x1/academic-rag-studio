@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+      - "8501:8501"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017
+      - DEFAULT_MODE=local
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./chromadb_store:/app/chromadb_store
+    depends_on:
+      - mongodb
+
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
