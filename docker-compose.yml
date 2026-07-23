@@ -5,11 +5,12 @@ services:
     build: .
     ports:
       - "8000:8000"
-      - "8501:8501"
     environment:
       - MONGODB_URI=mongodb://mongodb:27017
       - DEFAULT_MODE=local
+      - DISABLE_AUTH=true
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_REQUEST_TIMEOUT=120
     volumes:
       - ./data:/app/data
       - ./output:/app/output

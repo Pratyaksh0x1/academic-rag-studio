@@ -23,10 +23,19 @@ from src.user_store import (
 # Page configuration
 # --------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Academic RAG Studio",
+    page_title="Academic RAG Studio (Legacy)",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded",
+)
+
+# --------------------------------------------------------------------------
+# Redirect notice
+# --------------------------------------------------------------------------
+st.warning(
+    "This Streamlit interface is deprecated. The primary UI is now the **React + TypeScript + 3D** frontend. "
+    "Start the FastAPI server (`uvicorn api.main:app --reload --port 8000`) and open `http://localhost:8000`.",
+    icon="⚠️",
 )
 
 PAGES = [
