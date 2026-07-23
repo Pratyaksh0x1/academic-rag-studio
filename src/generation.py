@@ -1,35 +1,40 @@
 import logging
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Any, Optional
+
 import config
-from src.retrieval import retrieve_and_rerank, get_llm
+from src.retrieval import retrieve_and_rerank, get_llm, RetrievalError, get_threshold
+from src.llm_utils import complete_with_fallback, is_rate_limit_error
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("generation")
 
+
 def fetch_tavily_web_results(query: str) -> List[Dict[str, str]]:
-    """Calls Tavily search API for web fallback when local KB confidence is low."""
     if not config.TAVILY_API_KEY:
-        logger.warning("TAVILY_API_KEY is missing. Skipping live web fallback search.")
+        logger.warning("TAVILY_API_KEY is missing. Skipping web fallback search.")
         return []
     try:
         from tavily import TavilyClient
+
         client = TavilyClient(api_key=config.TAVILY_API_KEY)
         response = client.search(query=query, search_depth="advanced", max_results=5)
         results = []
         for res in response.get("results", []):
-            results.append({
-                "title": res.get("title", "Web Result"),
-                "url": res.get("url", ""),
-                "content": res.get("content", "")
-            })
-        logger.info(f"Tavily returned {len(results)} web search results.")
+            results.append(
+                {
+                    "title": res.get("title", "Web Result"),
+                    "url": res.get("url", ""),
+                    "content": res.get("content", ""),
+                }
+            )
+        logger.info("Tavily returned %s web search results.", len(results))
         return results
-    except Exception as e:
-        logger.error(f"Error executing Tavily web search: {e}")
+    except Exception as exc:
+        logger.error("Error executing Tavily web search: %s", exc)
         return []
 
+
 def calculate_confidence_score(chunks: List[Dict[str, Any]]) -> float:
-    """Calculates retrieval confidence score based on reranker similarity scores."""
     if not chunks:
         return 0.0
     scores = []
@@ -40,105 +45,157 @@ def calculate_confidence_score(chunks: List[Dict[str, Any]]) -> float:
             continue
     if not scores:
         return 0.0
-    # Combination of top score and average score
-    max_score = max(scores) if scores else 0.0
-    avg_score = sum(scores) / len(scores) if scores else 0.0
-    confidence = round((max_score * 0.6) + (avg_score * 0.4), 4)
-    return confidence
+    max_score = max(scores)
+    avg_score = sum(scores) / len(scores)
+    return round((max_score * 0.6) + (avg_score * 0.4), 4)
+
+
+def _format_chunk_sources(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "filename": chunk["source_filename"],
+            "score": chunk["score"],
+            "text_snippet": chunk["text"][:300],
+            "type": "document",
+        }
+        for chunk in chunks
+    ]
+
+
+def _generate_from_chunks(
+    query: str,
+    top_chunks: List[Dict[str, Any]],
+    mode: str,
+    *,
+    low_confidence: bool = False,
+) -> str:
+    context_str = "\n\n".join(
+        [f"[Source: {chunk['source_filename']}]\n{chunk['text']}" for chunk in top_chunks]
+    )
+    caveat = (
+        "Note: retrieval confidence is moderate. Ground your answer strictly in the excerpts and "
+        "state uncertainty where evidence is weak.\n\n"
+        if low_confidence
+        else ""
+    )
+    system_prompt = (
+        "You are a rigorous academic research assistant. Answer the user question using ONLY "
+        "the provided academic paper excerpts. Cite sources inline using [Filename.pdf]. "
+        "If the context does not contain the answer, state that explicitly.\n\n"
+        f"{caveat}"
+        f"Context Excerpts:\n{context_str}\n\n"
+        f"User Question: {query}\n\n"
+        "Academic Response:"
+    )
+    llm = get_llm(mode)
+    return complete_with_fallback(llm, system_prompt, mode=mode, label="answer generation")
+
 
 def generate_answer(
     query: str,
     top_chunks: Optional[List[Dict[str, Any]]] = None,
     mode: str = None,
-    threshold: float = config.CONFIDENCE_THRESHOLD
+    threshold: float = None,
 ) -> Dict[str, Any]:
-    """
-    Core Phase 4 Generation & CRAG flow:
-    1. Retrieve and rerank chunks if not provided
-    2. Compute confidence score
-    3. High confidence -> Local KB answer generation with citations
-    4. Low confidence -> Fall back to Tavily web search
-    """
+    mode = mode or config.config.mode
+    threshold = threshold if threshold is not None else get_threshold(mode)
+    retrieval_error = None
+
     if top_chunks is None:
-        top_chunks = retrieve_and_rerank(query, mode=mode)
-        
-    confidence_score = calculate_confidence_score(top_chunks)
-    logger.info(f"Retrieval confidence score for '{query}': {confidence_score:.4f} (Threshold: {threshold})")
-    
-    llm = get_llm(mode)
-    
-    # Check if confidence threshold is satisfied
-    if confidence_score >= threshold and top_chunks:
-        generation_mode = "local_kb"
-        context_str = "\n\n".join([
-            f"[Source: {c['source_filename']}]\n{c['text']}"
-            for c in top_chunks
-        ])
-        
-        system_prompt = (
-            "You are a rigorous academic researcher assistant. Answer the user question using ONLY "
-            "the provided academic paper excerpts. Cite your sources inline using [Filename.pdf]. "
-            "If the context does not contain the answer, state that explicitly.\n\n"
-            f"Context Excerpts:\n{context_str}\n\n"
-            f"User Question: {query}\n\n"
-            "Academic Response:"
-        )
-        
         try:
-            response = llm.complete(system_prompt)
-            answer_text = response.text.strip()
-        except Exception as e:
-            logger.error(f"Error during LLM generation: {e}")
-            answer_text = "An error occurred while generating the answer from the document context."
-            
-        sources = [
-            {"filename": c["source_filename"], "score": c["score"], "text_snippet": c["text"][:200]}
-            for c in top_chunks
-        ]
+            top_chunks = retrieve_and_rerank(query, mode=mode)
+        except RetrievalError as exc:
+            retrieval_error = str(exc)
+            top_chunks = []
+
+    confidence_score = calculate_confidence_score(top_chunks)
+    logger.info(
+        "Retrieval confidence for '%s': %.4f (threshold %.4f)",
+        query,
+        confidence_score,
+        threshold,
+    )
+
+    generation_mode = "local_kb"
+    sources: List[Dict[str, Any]] = []
+    answer_text = ""
+    warnings: List[str] = []
+
+    if retrieval_error:
+        warnings.append(retrieval_error)
+
+    if top_chunks:
+        sources = _format_chunk_sources(top_chunks)
+        low_confidence = confidence_score < threshold
+        try:
+            answer_text = _generate_from_chunks(
+                query,
+                top_chunks,
+                mode,
+                low_confidence=low_confidence,
+            )
+            generation_mode = "local_kb_low_confidence" if low_confidence else "local_kb"
+            if low_confidence:
+                warnings.append(
+                    "Retrieval confidence was below the preferred threshold, but an answer was "
+                    "still generated from your indexed documents."
+                )
+        except Exception as exc:
+            logger.error("LLM generation failed: %s", exc)
+            if is_rate_limit_error(exc):
+                warnings.append("Cloud API rate limit reached. Switch to local mode or retry later.")
+            generation_mode = "generation_error"
+            answer_text = (
+                "Retrieved relevant document excerpts but answer generation failed. "
+                "Review the source excerpts below."
+            )
+            warnings.append(str(exc))
     else:
-        # Corrective RAG (CRAG) Fallback to Web Search
         generation_mode = "web_fallback"
-        logger.info(f"Confidence score ({confidence_score:.4f}) below threshold ({threshold}). Triggering Tavily web fallback...")
-        
+        logger.info("No document chunks retrieved. Attempting optional web fallback.")
         web_results = fetch_tavily_web_results(query)
         if web_results:
-            web_context_str = "\n\n".join([
-                f"[Source: {w['title']} ({w['url']})]\n{w['content']}"
-                for w in web_results
-            ])
-            system_prompt = (
-                "You are an academic research assistant. The local knowledge base did not yield sufficient "
-                "confidence for this question. Answer the query using the following live web search results. "
-                "Clearly label in your answer that it was 'sourced from live web search'.\n\n"
-                f"Web Results:\n{web_context_str}\n\n"
+            web_context = "\n\n".join(
+                [f"[Source: {item['title']} ({item['url']})]\n{item['content']}" for item in web_results]
+            )
+            prompt = (
+                "You are an academic research assistant. Answer using the following web search results. "
+                "Clearly label that the answer was sourced from live web search.\n\n"
+                f"Web Results:\n{web_context}\n\n"
                 f"User Question: {query}\n\n"
                 "Response:"
             )
             try:
-                response = llm.complete(system_prompt)
-                answer_text = response.text.strip()
-            except Exception as e:
-                logger.error(f"Error during web fallback LLM generation: {e}")
-                answer_text = "Web search fallback returned results, but LLM generation failed."
-            sources = [{"title": w["title"], "url": w["url"], "snippet": w["content"][:200]} for w in web_results]
+                answer_text = complete_with_fallback(get_llm(mode), prompt, mode=mode, label="web fallback")
+                sources = [
+                    {"title": item["title"], "url": item["url"], "snippet": item["content"][:200], "type": "web"}
+                    for item in web_results
+                ]
+            except Exception as exc:
+                answer_text = "Web fallback failed and no indexed documents matched your query."
+                warnings.append(str(exc))
         else:
             answer_text = (
-                "The local knowledge base confidence was low, and live web search did not return results. "
-                "Please refine your query or upload relevant academic PDFs."
+                "No matching content was found in your indexed PDFs. "
+                "Upload documents and run indexing, then try again."
             )
-            sources = []
-            
+            if retrieval_error:
+                answer_text = retrieval_error
+
     return {
         "query": query,
         "answer": answer_text,
         "mode": generation_mode,
         "confidence_score": confidence_score,
-        "sources": sources
+        "sources": sources,
+        "retrieved_chunks": top_chunks,
+        "warnings": warnings,
     }
 
+
 if __name__ == "__main__":
-    q = "Explain the multi-head attention mechanism formulation."
-    logger.info(f"Testing generation for query: {q}")
-    res = generate_answer(q)
-    logger.info(f"Mode: {res['mode']} | Confidence: {res['confidence_score']}")
-    logger.info(f"Answer snippet: {res['answer'][:300]}...")
+    question = "Explain the multi-head attention mechanism formulation."
+    logger.info("Testing generation for query: %s", question)
+    result = generate_answer(question)
+    logger.info("Mode: %s | Confidence: %s", result["mode"], result["confidence_score"])
+    logger.info("Answer snippet: %s...", result["answer"][:300])

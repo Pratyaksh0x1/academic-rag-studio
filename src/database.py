@@ -10,8 +10,10 @@ logger = logging.getLogger("database")
 class MongoDBHandler:
     def __init__(self, uri: str = config.MONGODB_URI):
         self.uri = uri
+        self.memory_users: Dict[str, Dict[str, Any]] = {}
         try:
             self.client = MongoClient(self.uri, serverSelectionTimeoutMS=2000)
+            self.client.admin.command("ping")
             self.db = self.client["academic_rag_db"]
             self.users = self.db["users"]
             self.chat_history = self.db["chat_history"]
@@ -25,6 +27,9 @@ class MongoDBHandler:
 
     def create_user(self, username: str, password_hash: str) -> bool:
         if self.users is None:
+            if username in self.memory_users:
+                return False
+            self.memory_users[username] = {"username": username, "password_hash": password_hash}
             return True
         if self.users.find_one({"username": username}):
             return False
@@ -33,7 +38,7 @@ class MongoDBHandler:
 
     def get_user(self, username: str) -> Optional[Dict[str, Any]]:
         if self.users is None:
-            return None
+            return self.memory_users.get(username)
         return self.users.find_one({"username": username})
 
     def save_chat(self, username: str, query: str, answer: str, sources: List[Dict[str, Any]], mode: str):
