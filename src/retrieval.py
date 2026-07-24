@@ -253,7 +253,7 @@ def retrieve_and_rerank(
                 "node_id": node.node_id,
                 "text": node.get_content(),
                 "score": combined_score,
-                "raw_score": raw_val,
+                "raw_score": float(raw_val) if raw_val is not None else None,
                 "source_filename": meta.get("source_filename", "academic_paper.pdf"),
                 "file_path": meta.get("file_path", ""),
                 "metadata": meta,

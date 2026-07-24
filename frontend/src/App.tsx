@@ -2,7 +2,9 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Activity, ArrowUpRight, BookOpen, Check, Cloud, Database, FileUp, Gauge, Layers3, LogIn, LogOut, RefreshCw, Send, Server, ShieldCheck, Sparkles, UploadCloud, WifiOff, X } from 'lucide-react'
 import { api, Mode, QueryResponse, Source, StatusResponse } from './api/client'
 import { Scene3D } from './components/Scene3D'
+import { PaperHero } from './components/PaperHero';
 import './styles/index.css'
+
 
 interface Message { role: 'user' | 'assistant'; text: string; result?: QueryResponse }
 
@@ -153,6 +155,7 @@ function App() {
         </aside>
 
         <section className="main-column">
+        <PaperHero />
           <div className="section-heading"><div><div className="eyebrow">Knowledge field</div><h2>Live research graph</h2></div><span className="graph-status"><Activity size={14} />{nodeCount ? `${nodeCount} nodes indexed` : 'Awaiting index'}</span></div>
           <div className="graph-panel"><Scene3D active={busy} nodeCount={nodeCount} /><div className="graph-overlay"><div><span className="tiny-label">ACTIVE MODE</span><strong>{mode === 'local' ? 'LOCAL / PRIVATE' : 'CLOUD / EXTENDED'}</strong></div><div className="graph-legend"><span><i className="cyan" />retrieval nodes</span><span><i className="gold" />source links</span></div></div><div className="graph-caption"><Database size={15} />{documentCount ? `${documentCount} papers mapped into your research space` : 'Upload a paper to populate your research space'}<ArrowUpRight size={15} /></div></div>
 
