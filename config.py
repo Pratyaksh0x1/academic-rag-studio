@@ -15,10 +15,20 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 CHROMADB_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+def _clean_env_key(name: str) -> str:
+    """Read an API key from the environment, treating unfilled placeholder
+    values (e.g. 'your_openai_api_key_here', left over from .env.example)
+    as if the key were not set at all."""
+    value = os.getenv(name, "").strip()
+    if not value or value.lower().startswith("your_") or value.endswith("_here"):
+        return ""
+    return value
+
+
 # API Keys
-LLAMA_CLOUD_API_KEY = os.getenv("LLAMA_CLOUD_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+LLAMA_CLOUD_API_KEY = _clean_env_key("LLAMA_CLOUD_API_KEY")
+OPENAI_API_KEY = _clean_env_key("OPENAI_API_KEY")
+TAVILY_API_KEY = _clean_env_key("TAVILY_API_KEY")
 
 # MongoDB Config
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")

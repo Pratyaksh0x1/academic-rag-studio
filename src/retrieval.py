@@ -217,6 +217,15 @@ def retrieve_and_rerank(
     threshold = get_threshold(mode)
     logger.info("Using retrieval score threshold: %.4f for mode '%s'", threshold, mode)
 
+    # IMPORTANT: capture the original vector-similarity scores BEFORE reranking.
+    # The reranker postprocessor overwrites NodeWithScore.score in place with the
+    # rerank score, so if we read vector scores from the same objects afterward
+    # we're actually reading the rerank score twice (rerank counted at both 0.7
+    # and 0.3 weight, vector score never used). Snapshot by node_id first.
+    original_vector_scores = {
+        node_score.node.node_id: node_score.score for node_score in unique_nodes
+    }
+
     try:
         reranker = get_cached_reranker(config.LOCAL_RERANK_MODEL, top_k_rerank)
         reranked_nodes = reranker.postprocess_nodes(unique_nodes, query_str=query)
@@ -233,7 +242,7 @@ def retrieve_and_rerank(
         meta = node.metadata or {}
         raw_val = node_score.score
         rerank_norm = sigmoid_score(raw_val)
-        vector_norm = normalize_vector_score(getattr(node_score, "score", None))
+        vector_norm = normalize_vector_score(original_vector_scores.get(node.node_id))
         combined_score = round((rerank_norm * 0.7) + (vector_norm * 0.3), 4)
 
         if combined_score < threshold:
