@@ -1,14 +1,15 @@
+import logging
 import shutil
 from pathlib import Path
 from typing import List
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
-from api.auth import create_jwt_token, hash_password, verify_jwt_token
+from api.auth import create_jwt_token, hash_password, verify_jwt_token, verify_password
 from api.models import (
     IngestResponse,
     MatrixRequest,
@@ -43,6 +44,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logger = logging.getLogger("api")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Catch-all so failures deep in the pipeline (model download errors,
+    Ollama unreachable, OpenAI errors, etc.) come back as structured JSON
+    the frontend can display, instead of a bare 'Internal Server Error'."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    message = str(exc)
+    hint = None
+    if "huggingface" in message.lower() or "connect" in message.lower():
+        hint = (
+            "This often means a required model could not be downloaded and there is "
+            "no internet connection, or Ollama/OpenAI is unreachable. Check your network "
+            "connection and API keys/Ollama status."
+        )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_error",
+            "detail": message,
+            "hint": hint,
+            "path": request.url.path,
+        },
+    )
 
 
 @app.get("/api/health")
@@ -102,7 +130,7 @@ def register(user: UserRegister):
 @app.post("/auth/login", response_model=TokenResponse)
 def login(user: UserLogin):
     stored = db_handler.get_user(user.username)
-    if not stored or stored.get("password_hash") != hash_password(user.password):
+    if not stored or not verify_password(user.password, stored.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid username or password.")
     token = create_jwt_token(user.username)
     return {"access_token": token, "token_type": "bearer"}

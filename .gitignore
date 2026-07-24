@@ -12,6 +12,11 @@ __pycache__/
 # Environment variables
 .env
 
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
 # VS Code
 .vscode/
 

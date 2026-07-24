@@ -1,6 +1,6 @@
-import hashlib
 import time
 from typing import Optional
+import bcrypt
 import jwt
 from fastapi import HTTPException, Security, status, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -11,7 +11,19 @@ security = HTTPBearer(auto_error=not config.DISABLE_AUTH)
 
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    """Salted bcrypt hash. Each call produces a different hash for the same
+    password (bcrypt generates a fresh random salt internally), so hashes
+    must be compared with verify_password(), never with `==`."""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except (ValueError, TypeError):
+        # Handles legacy/malformed hashes (e.g. old sha256 hex digests) gracefully
+        # instead of raising, so a bad stored hash just fails auth rather than 500s.
+        return False
 
 
 def create_jwt_token(username: str) -> str:
